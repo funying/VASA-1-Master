@@ -1,0 +1,4 @@
+[
+    {"id": "001", "image_path": "celebA/001.jpg", "attributes": {"gender": "male", "age": "25"}},
+    {"id": "002", "image_path": "celebA/002.jpg", "attributes": {"gender": "female", "age": "30"}}
+]

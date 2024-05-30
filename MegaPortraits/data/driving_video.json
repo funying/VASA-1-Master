@@ -1,0 +1,5 @@
+[
+    {"source": "source1.jpg", "driving": "driving1.mp4"},
+    {"source": "source2.jpg", "driving": "driving2.mp4"},
+    ...
+]
