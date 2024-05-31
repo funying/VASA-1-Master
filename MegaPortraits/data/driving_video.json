@@ -1,13 +1,67 @@
 [
     {
-        "source": "path/to/source_image1.jpg",
-        "driving": "path/to/driving_video1.mp4",
+        "source": "/content/drive/MyDrive/VASA-1-master/image/0.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/0.mp4",
         "same_person": true
     },
     {
-        "source": "path/to/source_image2.jpg",
-        "driving": "path/to/driving_video2.mp4",
+        "source": "/content/drive/MyDrive/VASA-1-master/image/7.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/7.mp4",
+        "same_person": true
+    },
+    {
+        "source": "/content/drive/MyDrive/VASA-1-master/image/5.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/5.mp4",
+        "same_person": true
+    },
+    {
+        "source": "/content/drive/MyDrive/VASA-1-master/image/4.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/4.mp4",
+        "same_person": true
+    },
+    {
+        "source": "/content/drive/MyDrive/VASA-1-master/image/3.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/3.mp4",
+        "same_person": true
+    },
+    {
+        "source": "/content/drive/MyDrive/VASA-1-master/image/2.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/2.mp4",
+        "same_person": true
+    },
+    {
+        "source": "/content/drive/MyDrive/VASA-1-master/image/1.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/1.mp4",
+        "same_person": true
+    },
+    {
+        "source": "/content/drive/MyDrive/VASA-1-master/image/0.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/1.mp4",
         "same_person": false
     },
-    ...
+    {
+        "source": "/content/drive/MyDrive/VASA-1-master/image/7.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/3.mp4",
+        "same_person": false
+    },
+    {
+        "source": "/content/drive/MyDrive/VASA-1-master/image/1.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/7.mp4",
+        "same_person": false
+    },
+    {
+        "source": "/content/drive/MyDrive/VASA-1-master/image/4.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/2.mp4",
+        "same_person": false
+    },
+    {
+        "source": "/content/drive/MyDrive/VASA-1-master/image/3.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/7.mp4",
+        "same_person": false
+    },
+    {
+        "source": "/content/drive/MyDrive/VASA-1-master/image/2.png",
+        "driving": "/content/drive/MyDrive/VASA-1-master/video/1.mp4",
+        "same_person": false
+    }
 ]
