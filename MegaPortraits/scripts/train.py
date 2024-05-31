@@ -131,6 +131,7 @@ class Trainer:
         train_dataset = MegaPortraitDataset(self.config['data_path'], transform)
         self.train_loader = DataLoader(train_dataset, batch_size=self.config['batch_size'], shuffle=True, num_workers=4)
 
+
     def train(self):
         start_epoch = 0
         if self.config['resume']:
@@ -143,21 +144,40 @@ class Trainer:
                 target = target.to(self.device)
 
                 if self.model_type == 'base':
-                    self.train_base_model(source, target)
+                    self.train_base_model(source, target, i)
                 elif self.model_type == 'highres':
-                    self.train_high_res_model(source, target)
+                    self.train_high_res_model(source, target, i)
                 elif self.model_type == 'student':
-                    self.train_student_model(source, target)
+                    self.train_student_model(source, target, i)
 
                 if i % self.config['log_interval'] == 0:
                     self.logger.info(f"Epoch [{epoch}/{self.config['epochs']}], Step [{i}/{len(self.train_loader)}], "
-                                     f"Loss: {self.total_loss.item():.4f}, D Loss: {self.d_loss.item():.4f}")
+                                    f"Loss: {self.total_loss.item():.4f}, D Loss: {self.d_loss.item():.4f}")
 
             if (epoch + 1) % self.config['checkpoint_interval'] == 0:
                 self.save_checkpoint(epoch + 1)
 
-    def train_base_model(self, source, target):
+
+    def train_base_model(self, source, target, iteration):
         self.optimizer_G.zero_grad()
+
+        if iteration % 2 == 0:
+            sample_info = self.train_loader.dataset.same_person_pairs[iteration % len(self.train_loader.dataset.same_person_pairs)]
+        else:
+            sample_info = self.train_loader.dataset.different_person_pairs[iteration % len(self.train_loader.dataset.different_person_pairs)]
+
+        source_path = os.path.join(self.train_loader.dataset.data_path, sample_info['source'])
+        driving_path = os.path.join(self.train_loader.dataset.data_path, sample_info['driving'])
+
+        source_image = Image.open(source_path).convert('RGB')
+        driving_frames = self.train_loader.dataset.load_video(driving_path)
+
+        if self.train_loader.dataset.transform:
+            source_image = self.train_loader.dataset.transform(source_image)
+            driving_frames = [self.train_loader.dataset.transform(frame) for frame in driving_frames]
+
+        source = source_image.to(self.device)
+        target = driving_frames.to(self.device)
 
         v_s = self.appearance_encoder(source)
         e_s = self.motion_encoder(source)
@@ -191,8 +211,27 @@ class Trainer:
         self.d_loss.backward()
         self.optimizer_D.step()
 
-    def train_high_res_model(self, source, target):
+
+    def train_high_res_model(self, source, target, iteration):
         self.optimizer_G.zero_grad()
+
+        if iteration % 2 == 0:
+            sample_info = self.train_loader.dataset.same_person_pairs[iteration % len(self.train_loader.dataset.same_person_pairs)]
+        else:
+            sample_info = self.train_loader.dataset.different_person_pairs[iteration % len(self.train_loader.dataset.different_person_pairs)]
+
+        source_path = os.path.join(self.train_loader.dataset.data_path, sample_info['source'])
+        driving_path = os.path.join(self.train_loader.dataset.data_path, sample_info['driving'])
+
+        source_image = Image.open(source_path).convert('RGB')
+        driving_frames = self.train_loader.dataset.load_video(driving_path)
+
+        if self.train_loader.dataset.transform:
+            source_image = self.train_loader.dataset.transform(source_image)
+            driving_frames = [self.train_loader.dataset.transform(frame) for frame in driving_frames]
+
+        source = source_image.to(self.device)
+        target = driving_frames.to(self.device)
 
         output = self.model(source)
 
@@ -212,8 +251,27 @@ class Trainer:
         self.d_loss.backward()
         self.optimizer_D.step()
 
-    def train_student_model(self, source, target):
+
+    def train_student_model(self, source, target, iteration):
         self.optimizer_G.zero_grad()
+
+        if iteration % 2 == 0:
+            sample_info = self.train_loader.dataset.same_person_pairs[iteration % len(self.train_loader.dataset.same_person_pairs)]
+        else:
+            sample_info = self.train_loader.dataset.different_person_pairs[iteration % len(self.train_loader.dataset.different_person_pairs)]
+
+        source_path = os.path.join(self.train_loader.dataset.data_path, sample_info['source'])
+        driving_path = os.path.join(self.train_loader.dataset.data_path, sample_info['driving'])
+
+        source_image = Image.open(source_path).convert('RGB')
+        driving_frames = self.train_loader.dataset.load_video(driving_path)
+
+        if self.train_loader.dataset.transform:
+            source_image = self.train_loader.dataset.transform(source_image)
+            driving_frames = [self.train_loader.dataset.transform(frame) for frame in driving_frames]
+
+        source = source_image.to(self.device)
+        target = driving_frames.to(self.device)
 
         output = self.model(source)
 
@@ -221,7 +279,6 @@ class Trainer:
         loss_adv = self.adversarial_loss(self.discriminator(target), self.discriminator(output))
 
         self.total_loss = loss_perceptual + loss_adv
-        self.total_loss```python
         self.total_loss.backward()
         self.optimizer_G.step()
 
@@ -231,6 +288,7 @@ class Trainer:
         self.d_loss = (real_loss + fake_loss) / 2
         self.d_loss.backward()
         self.optimizer_D.step()
+
 
     def save_checkpoint(self, epoch):
         if self.model_type == 'base':

@@ -1,5 +1,7 @@
 # scripts/train_base_model.py
 
+import argparse
+import yaml
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -10,11 +12,15 @@ from models.motion_encoder import MotionEncoder
 from models.warping_generators import WarpingGenerator
 from models.conv3d import Conv3D
 from models.conv2d import Conv2D
+from models.discriminator import PatchGANDiscriminator
 from losses.perceptual_loss import PerceptualLoss
 from losses.adversarial_loss import AdversarialLoss
 from losses.cycle_consistency_loss import CycleConsistencyLoss
 from losses.pairwise_loss import PairwiseLoss
 from losses.cosine_similarity_loss import CosineSimilarityLoss
+from utils.logger import setup_logger
+from utils.checkpoint import save_checkpoint, load_checkpoint
+from datasets.dataset import MegaPortraitDataset
 
 class BaseModelTrainer:
     def __init__(self, config):
@@ -64,8 +70,6 @@ class BaseModelTrainer:
             transforms.CenterCrop(224),
             transforms.ToTensor()
         ])
-        # Assuming dataset.py provides the dataset class
-        from datasets.dataset import MegaPortraitDataset
         train_dataset = MegaPortraitDataset(self.config['data_path'], transform)
         self.train_loader = DataLoader(train_dataset, batch_size=self.config['batch_size'], shuffle=True, num_workers=4)
 
@@ -75,6 +79,27 @@ class BaseModelTrainer:
                 source, target = data
                 source = source.to(self.device)
                 target = target.to(self.device)
+
+                # Determine if we should use same person pairs or different person pairs
+                if i % 2 == 0:
+                    # Use pairs from same_person_pairs for loss functions that require same person
+                    sample_info = self.train_loader.dataset.same_person_pairs[i % len(self.train_loader.dataset.same_person_pairs)]
+                else:
+                    # Use pairs from different_person_pairs for other loss functions
+                    sample_info = self.train_loader.dataset.different_person_pairs[i % len(self.train_loader.dataset.different_person_pairs)]
+
+                source_path = os.path.join(self.train_loader.dataset.data_path, sample_info['source'])
+                driving_path = os.path.join(self.train_loader.dataset.data_path, sample_info['driving'])
+
+                source_image = Image.open(source_path).convert('RGB')
+                driving_frames = self.train_loader.dataset.load_video(driving_path)
+
+                if self.train_loader.dataset.transform:
+                    source_image = self.train_loader.dataset.transform(source_image)
+                    driving_frames = [self.train_loader.dataset.transform(frame) for frame in driving_frames]
+
+                source = source_image.to(self.device)
+                target = driving_frames.to(self.device)
 
                 # Generator forward pass
                 self.optimizer_G.zero_grad()
@@ -122,8 +147,11 @@ class BaseModelTrainer:
                           f"Loss: {total_loss.item():.4f}, D Loss: {d_loss.item():.4f}")
 
 if __name__ == "__main__":
-    import yaml
-    with open('configs/training/base_model.yaml', 'r') as f:
+    parser = argparse.ArgumentParser(description='Training script for Base Model')
+    parser.add_argument('--config', type=str, required=True, help='Path to the config file')
+    args = parser.parse_args()
+
+    with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
 
     trainer = BaseModelTrainer(config)

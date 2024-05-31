@@ -1,5 +1,13 @@
 [
-    {"source": "source1.jpg", "driving": "driving1.mp4"},
-    {"source": "source2.jpg", "driving": "driving2.mp4"},
+    {
+        "source": "path/to/source_image1.jpg",
+        "driving": "path/to/driving_video1.mp4",
+        "same_person": true
+    },
+    {
+        "source": "path/to/source_image2.jpg",
+        "driving": "path/to/driving_video2.mp4",
+        "same_person": false
+    },
     ...
 ]

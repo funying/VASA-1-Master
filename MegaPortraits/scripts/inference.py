@@ -38,7 +38,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Inference script for MegaPortraits')
     parser.add_argument('--model_path', type=str, required=True, help='Path to the trained model')
     parser.add_argument('--source_path', type=str, required=True, help='Path to the source image')
-    parser.add_argument('--driving_path', type=str, required=True, help='Path to the driving image')
+    parser.add_argument('--driving_path', type=str, required=True, help='Path to the driving video')
     parser.add_argument('--output_path', type=str, required=True, help='Path to save the generated image')
     args = parser.parse_args()
 
