@@ -1,7 +1,7 @@
-data_path: 'path/to/data'
+data_path: 'data'
 checkpoint_path: 'path/to/checkpoints'
 log_path: 'train_base.log'
-epochs: 50
+epochs: 10
 batch_size: 8
 lr: 0.0001
 log_interval: 10

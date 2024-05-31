@@ -41,7 +41,7 @@ class MegaPortraitDataset(Dataset):
             source_image = self.transform(source_image)
             driving_frames = [self.transform(frame) for frame in driving_frames]
 
-        return source_image, driving_frames
+        return source_image, torch.stack(driving_frames)
 
     def load_video(self, video_path):
         video_capture = cv2.VideoCapture(video_path)
@@ -51,27 +51,10 @@ class MegaPortraitDataset(Dataset):
             if not ret:
                 break
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(Image.fromarray(frame))
+            frame = Image.fromarray(frame).resize((224, 224))  # Ensure all frames are 224x224
+            frames.append(frame)
         video_capture.release()
         return frames
-
-    def center_crop(self, image):
-        width, height = image.size
-        new_width, new_height = 224, 224
-        left = (width - new_width)/2
-        top = (height - new_height)/2
-        right = (width + new_width)/2
-        bottom = (height + new_height)/2
-        image = image.crop((left, top, right, bottom))
-        return image
-
-    def random_warp(self, image):
-        image_np = np.array(image)
-        src_points = np.float32([[50, 50], [200, 50], [50, 200]])
-        dst_points = src_points + np.random.uniform(-10, 10, src_points.shape).astype(np.float32)
-        tform = cv2.getAffineTransform(src_points, dst_points)
-        warped = cv2.warpAffine(image_np, tform, (image_np.shape[1], image_np.shape[0]))
-        return Image.fromarray(warped)
 
 if __name__ == "__main__":
     transform = transforms.Compose([
@@ -80,7 +63,7 @@ if __name__ == "__main__":
         transforms.CenterCrop(224),
         transforms.ToTensor()
     ])
-    dataset = MegaPortraitDataset(data_path='/path/to/data', transform=transform)
+    dataset = MegaPortraitDataset(data_path='/data', transform=transform)
     print(f'Dataset size: {len(dataset)}')
     sample = dataset[0]
     print(f'Sample shapes: {sample[0].shape}, {len(sample[1])} driving frames')

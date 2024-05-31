@@ -5,12 +5,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class ResidualBlock2D(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, num_groups=8):
         super(ResidualBlock2D, self).__init__()
+        if out_channels % num_groups != 0:
+            raise ValueError(f'out_channels ({out_channels}) must be divisible by num_groups ({num_groups})')
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        self.gn1 = nn.GroupNorm(8, out_channels)
+        self.gn1 = nn.GroupNorm(num_groups, out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        self.gn2 = nn.GroupNorm(8, out_channels)
+        self.gn2 = nn.GroupNorm(num_groups, out_channels)
         if in_channels != out_channels:
             self.skip = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1)
         else:
@@ -28,15 +30,15 @@ class Conv2D(nn.Module):
         super(Conv2D, self).__init__()
         self.reshaped = nn.Conv2d(96 * 16, 1536, kernel_size=1, stride=1)
         self.res_blocks = nn.Sequential(
-            ResidualBlock2D(1536, 512),
+            ResidualBlock2D(1536, 512, num_groups=8),  # 512 is divisible by 8
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            ResidualBlock2D(512, 256),
+            ResidualBlock2D(512, 256, num_groups=8),  # 256 is divisible by 8
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            ResidualBlock2D(256, 128),
+            ResidualBlock2D(256, 128, num_groups=8),  # 128 is divisible by 8
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            ResidualBlock2D(128, 64),
+            ResidualBlock2D(128, 64, num_groups=8),   # 64 is divisible by 8
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            ResidualBlock2D(64, 3)
+            ResidualBlock2D(64, 32, num_groups=8)    # 32 is divisible by 8
         )
 
     def forward(self, x):
@@ -48,3 +50,4 @@ class Conv2D(nn.Module):
 if __name__ == "__main__":
     model = Conv2D()
     print(model)
+

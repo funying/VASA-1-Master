@@ -1,6 +1,10 @@
 # scripts/train.py
+import sys
+import os
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
+from PIL import Image
 import yaml
 import torch
 import torch.nn as nn
@@ -13,6 +17,7 @@ from models.conv3d import Conv3D
 from models.conv2d import Conv2D
 from models.high_res_model import HighResModel
 from models.student_model import StudentModel
+from models.discriminator import PatchGANDiscriminator
 from losses.perceptual_loss import PerceptualLoss
 from losses.adversarial_loss import AdversarialLoss
 from losses.cycle_consistency_loss import CycleConsistencyLoss
@@ -177,7 +182,7 @@ class Trainer:
             driving_frames = [self.train_loader.dataset.transform(frame) for frame in driving_frames]
 
         source = source_image.to(self.device)
-        target = driving_frames.to(self.device)
+        target = torch.stack(driving_frames).to(self.device)  # Stack driving frames into a single tensor
 
         v_s = self.appearance_encoder(source)
         e_s = self.motion_encoder(source)
@@ -231,7 +236,7 @@ class Trainer:
             driving_frames = [self.train_loader.dataset.transform(frame) for frame in driving_frames]
 
         source = source_image.to(self.device)
-        target = driving_frames.to(self.device)
+        target = torch.stack(driving_frames).to(self.device)  # Stack driving frames into a single tensor
 
         output = self.model(source)
 
@@ -271,7 +276,7 @@ class Trainer:
             driving_frames = [self.train_loader.dataset.transform(frame) for frame in driving_frames]
 
         source = source_image.to(self.device)
-        target = driving_frames.to(self.device)
+        target = torch.stack(driving_frames).to(self.device)  # Stack driving frames into a single tensor
 
         output = self.model(source)
 
