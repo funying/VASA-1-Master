@@ -145,8 +145,13 @@ class Trainer:
         for epoch in range(start_epoch, self.config['epochs']):
             for i, data in enumerate(self.train_loader):
                 source, target = data
+                print(f"Before device move - Source type: {type(source)}, Target type: {type(target)}")
                 source = source.to(self.device)
+                if isinstance(target, list):
+                    target = torch.stack(target)
                 target = target.to(self.device)
+
+                print(f"After device move - Source shape: {source.shape}, Target shape: {target.shape}")
 
                 if self.model_type == 'base':
                     self.train_base_model(source, target, i)
@@ -163,7 +168,10 @@ class Trainer:
                 self.save_checkpoint(epoch + 1)
 
 
+
+
     def train_base_model(self, source, target, iteration):
+        print("Starting train_base_model function")
         self.optimizer_G.zero_grad()
 
         if iteration % 2 == 0:
@@ -181,13 +189,34 @@ class Trainer:
             source_image = self.train_loader.dataset.transform(source_image)
             driving_frames = [self.train_loader.dataset.transform(frame) for frame in driving_frames]
 
-        source = source_image.to(self.device)
-        target = torch.stack(driving_frames).to(self.device)  # Stack driving frames into a single tensor
+        print(f"Type of driving_frames: {type(driving_frames)}")
+        print(f"Length of driving_frames: {len(driving_frames)}")
+
+        if not isinstance(driving_frames, list):
+            raise TypeError(f"Expected driving_frames to be a list, but got {type(driving_frames)}")
+
+        driving_frames = torch.stack(driving_frames)
+        print(f"Shape of driving_frames after stacking: {driving_frames.shape}")
+
+        source = source_image.unsqueeze(0).to(self.device)
+        target = driving_frames.unsqueeze(0).to(self.device)
+        print(f"Source shape after moving to device: {source.shape}")
+        print(f"Target shape after moving to device: {target.shape}")
+
+        batch_size, num_frames, channels, height, width = target.shape
+        target = target.view(batch_size * num_frames, channels, height, width)
+        print(f'Source shape before passing to the encoder: {source.shape}')
+        print(f'Target shape before passing to the encoder: {target.shape}')
 
         v_s = self.appearance_encoder(source)
+        print(f"Encoded source shape: {v_s.shape}")
+
         e_s = self.motion_encoder(source)
         R_s, t_s, z_s = e_s
         v_d = self.appearance_encoder(target)
+        v_d = v_d.view(batch_size, num_frames, *v_d.shape[1:])
+        print(f"Encoded target shape: {v_d.shape}")
+
         e_d = self.motion_encoder(target)
         R_d, t_d, z_d = e_d
 
@@ -215,6 +244,8 @@ class Trainer:
         self.d_loss = (real_loss + fake_loss) / 2
         self.d_loss.backward()
         self.optimizer_D.step()
+
+
 
 
     def train_high_res_model(self, source, target, iteration):
