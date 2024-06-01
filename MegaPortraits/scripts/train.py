@@ -8,8 +8,10 @@ from PIL import Image
 import yaml
 import torch
 import torch.nn as nn
+import gc
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from torch.cuda.amp import GradScaler, autocast
 from models.appearance_encoder import AppearanceEncoder
 from models.motion_encoder import MotionEncoder
 from models.warping_generators import WarpingGenerator
@@ -26,6 +28,8 @@ from losses.cosine_similarity_loss import CosineSimilarityLoss
 from utils.logger import setup_logger
 from utils.checkpoint import save_checkpoint, load_checkpoint
 from datasets.dataset import MegaPortraitDataset
+from utils.intermediate import save_intermediate, load_intermediate
+
 
 class Trainer:
     def __init__(self, config, model_type):
@@ -168,7 +172,7 @@ class Trainer:
                 self.save_checkpoint(epoch + 1)
 
 
-
+    
 
     def train_base_model(self, source, target, iteration):
         print("Starting train_base_model function")
@@ -189,61 +193,131 @@ class Trainer:
             source_image = self.train_loader.dataset.transform(source_image)
             driving_frames = [self.train_loader.dataset.transform(frame) for frame in driving_frames]
 
-        print(f"Type of driving_frames: {type(driving_frames)}")
-        print(f"Length of driving_frames: {len(driving_frames)}")
-
-        if not isinstance(driving_frames, list):
-            raise TypeError(f"Expected driving_frames to be a list, but got {type(driving_frames)}")
-
         driving_frames = torch.stack(driving_frames)
-        print(f"Shape of driving_frames after stacking: {driving_frames.shape}")
-
         source = source_image.unsqueeze(0).to(self.device)
         target = driving_frames.unsqueeze(0).to(self.device)
-        print(f"Source shape after moving to device: {source.shape}")
-        print(f"Target shape after moving to device: {target.shape}")
 
         batch_size, num_frames, channels, height, width = target.shape
         target = target.view(batch_size * num_frames, channels, height, width)
-        print(f'Source shape before passing to the encoder: {source.shape}')
-        print(f'Target shape before passing to the encoder: {target.shape}')
 
-        v_s = self.appearance_encoder(source)
-        print(f"Encoded source shape: {v_s.shape}")
+        print(f'Before appearance_encoder (v_s): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+        with autocast():
+            v_s = self.appearance_encoder(source)
+        print(f'After appearance_encoder (v_s): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
 
         e_s = self.motion_encoder(source)
         R_s, t_s, z_s = e_s
-        v_d = self.appearance_encoder(target)
-        v_d = v_d.view(batch_size, num_frames, *v_d.shape[1:])
-        print(f"Encoded target shape: {v_d.shape}")
 
-        e_d = self.motion_encoder(target)
-        R_d, t_d, z_d = e_d
+        chunk_size = 100  # Adjust the chunk size as needed
+        intermediate_path = "/content/drive/MyDrive/VASA-1-master/intermediate_chunks"
 
-        w_s = self.warping_generator_s(R_s, t_s, z_s, e_s)
-        w_d = self.warping_generator_d(R_d, t_d, z_d, e_d)
+        for i in range(0, target.size(0), chunk_size):
+            target_chunk = target[i:i+chunk_size]
 
-        v_s_warped = self.conv3d(w_s)
-        v_d_warped = self.conv3d(w_d)
+            print(f'Processing chunk {i//chunk_size + 1} with size {target_chunk.size(0)}')
+            print(f'Before appearance_encoder (v_d chunk): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+            print(f'GPU memory reserved before processing chunk: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+            with autocast():
+                v_d_chunk = self.appearance_encoder(target_chunk)
+            print(f'After appearance_encoder (v_d chunk): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+            print(f'GPU memory reserved after processing chunk: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
-        output = self.conv2d(v_s_warped)
+            # Save the processed chunk to disk
+            save_intermediate(v_d_chunk.cpu(), intermediate_path, f'v_d_chunk_{i//chunk_size}')
+            
+            del target_chunk, v_d_chunk
+            torch.cuda.empty_cache()
+            gc.collect()  # Force garbage collection
+            print(f'GPU memory reserved after clearing cache and gc: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
-        loss_perceptual = self.perceptual_loss(output, target)
-        loss_adv = self.adversarial_loss(self.discriminator(target), self.discriminator(output))
-        loss_cycle = self.cycle_consistency_loss(output, target)
-        loss_pairwise = self.pairwise_loss(v_s, v_d)
-        loss_cosine = self.cosine_similarity_loss(e_s, e_d)
+        total_v_d = []
+        for i in range(0, target.size(0), chunk_size):
+            # Load the processed chunk from disk
+            v_d_chunk = load_intermediate(intermediate_path, f'v_d_chunk_{i//chunk_size}', self.device)
+            total_v_d.append(v_d_chunk)
+            del v_d_chunk
+            torch.cuda.empty_cache()
+            gc.collect()  # Force garbage collection
 
-        self.total_loss = loss_perceptual + loss_adv + loss_cycle + loss_pairwise + loss_cosine
-        self.total_loss.backward()
-        self.optimizer_G.step()
+        if total_v_d:
+            v_d = torch.cat(total_v_d, dim=0).to(self.device)  # Concatenate on GPU
+            v_d = v_d.view(batch_size, num_frames, *v_d.shape[1:])
+            print(f"Encoded target shape: {v_d.shape}")
+            print(f'Before motion_encoder (e_d): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+            print(f'GPU memory reserved before motion_encoder: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
-        self.optimizer_D.zero_grad()
-        real_loss = self.adversarial_loss(self.discriminator(target), torch.ones_like(self.discriminator(target)))
-        fake_loss = self.adversarial_loss(self.discriminator(output.detach()), torch.zeros_like(self.discriminator(output.detach())))
-        self.d_loss = (real_loss + fake_loss) / 2
-        self.d_loss.backward()
-        self.optimizer_D.step()
+            # Save motion encoder intermediate results
+            for i in range(0, target.size(0), chunk_size):
+                target_chunk = target[i:i+chunk_size]
+                with autocast():
+                    e_d_chunk = self.motion_encoder(target_chunk)
+                for j, tensor in enumerate(e_d_chunk):
+                    save_intermediate(tensor.cpu(), intermediate_path, f'e_d_chunk_{i//chunk_size}_{j}')
+                del target_chunk, e_d_chunk
+                torch.cuda.empty_cache()
+                gc.collect()  # Force garbage collection
+
+            # Load all motion encoder intermediate results
+            motion_encodings = [[] for _ in range(3)]
+            for i in range(0, target.size(0), chunk_size):
+                for j in range(3):
+                    e_d_chunk = load_intermediate(intermediate_path, f'e_d_chunk_{i//chunk_size}_{j}', self.device)
+                    motion_encodings[j].append(e_d_chunk)
+                    del e_d_chunk
+                    torch.cuda.empty_cache()
+                    gc.collect()  # Force garbage collection
+
+            e_d = tuple(torch.cat(motion_encodings[j], dim=0) for j in range(3))
+            R_d, t_d, z_d = e_d
+
+            print(f'After motion_encoder (e_d): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+            print(f'GPU memory reserved after motion_encoder: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+            with autocast():
+                w_s = self.warping_generator_s(R_s, t_s, z_s, e_s)
+                w_d = self.warping_generator_d(R_d, t_d, z_d, e_d)
+
+                v_s_warped = self.conv3d(w_s)
+                v_d_warped = self.conv3d(w_d)
+
+                output = self.conv2d(v_s_warped)
+
+                loss_perceptual = self.perceptual_loss(output, target)
+                loss_adv = self.adversarial_loss(self.discriminator(target), self.discriminator(output))
+                loss_cycle = self.cycle_consistency_loss(output, target)
+                loss_pairwise = self.pairwise_loss(v_s, v_d)
+                loss_cosine = self.cosine_similarity_loss(e_s, e_d)
+
+                self.total_loss = loss_perceptual + loss_adv + loss_cycle + loss_pairwise + loss_cosine
+            print(f'After loss calculation: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+            print(f'GPU memory reserved after loss calculation: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+            self.scaler.scale(self.total_loss).backward()
+            self.scaler.step(self.optimizer_G)
+            self.scaler.update()
+
+            torch.cuda.empty_cache()
+            gc.collect()  # Force garbage collection
+            print(f'GPU memory reserved after updating optimizer_G: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+            self.optimizer_D.zero_grad()
+            with autocast():
+                real_loss = self.adversarial_loss(self.discriminator(target), torch.ones_like(self.discriminator(target)))
+                fake_loss = self.adversarial_loss(self.discriminator(output.detach()), torch.zeros_like(self.discriminator(output.detach())))
+                self.d_loss = (real_loss + fake_loss) / 2
+
+            self.scaler.scale(self.d_loss).backward()
+            self.scaler.step(self.optimizer_D)
+            self.scaler.update()
+
+            torch.cuda.empty_cache()
+            gc.collect()  # Force garbage collection
+            print(f'GPU memory reserved at end of iteration: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+            print(f'End of iteration: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+        else:
+            print("Error: total_v_d is empty, unable to concatenate tensors.")
+
 
 
 
