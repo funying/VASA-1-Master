@@ -27,7 +27,7 @@ class Conv3D(nn.Module):
     def __init__(self):
         super(Conv3D, self).__init__()
         self.res_blocks = nn.Sequential(
-            ResidualBlock3D(96, 192),
+            ResidualBlock3D(3, 192),  # Change input channels from 96 to 3
             nn.MaxPool3d(2),
             ResidualBlock3D(192, 384),
             nn.MaxPool3d(2),

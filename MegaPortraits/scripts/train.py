@@ -207,6 +207,7 @@ class Trainer:
 
         e_s = self.motion_encoder(source)
         R_s, t_s, z_s = e_s
+        print(f'R_s shape: {R_s.shape}, t_s shape: {t_s.shape}, z_s shape: {z_s.shape}')  # Debug print
 
         chunk_size = 100  # Adjust the chunk size as needed
         intermediate_path = "/content/drive/MyDrive/VASA-1-master/intermediate_chunks"
@@ -269,16 +270,49 @@ class Trainer:
 
             e_d = tuple(torch.cat(motion_encodings[j], dim=0) for j in range(3))
             R_d, t_d, z_d = e_d
+            print(f'R_d shape: {R_d.shape}, t_d shape: {t_d.shape}, z_d shape: {z_d.shape}')  # Debug print
 
             print(f'After motion_encoder (e_d): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
             print(f'GPU memory reserved after motion_encoder: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
             with autocast():
-                w_s = self.warping_generator_s(R_s, t_s, z_s, e_s)
-                w_d = self.warping_generator_d(R_d, t_d, z_d, e_d)
+                e_s_unpacked = torch.cat(e_s, dim=1)
+                print(f'Before warping_generator_s: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved before warping_generator_s: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+                w_s = self.warping_generator_s(R_s, t_s, z_s, e_s_unpacked)
+                print(f'After warping_generator_s: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved after warping_generator_s: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
+                e_d_unpacked = torch.cat(e_d, dim=1)
+                print(f'Before warping_generator_d: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved before warping_generator_d: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+                w_d = self.warping_generator_d(R_d, t_d, z_d, e_d_unpacked)
+                print(f'After warping_generator_d: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved after warping_generator_d: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+                # Save intermediate results of warping_generator_d
+                save_intermediate(w_d.cpu(), intermediate_path, 'w_d')
+
+                del w_d
+                torch.cuda.empty_cache()
+                gc.collect()
+                print(f'GPU memory reserved after saving and clearing w_d: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+                # Load and process warping_generator_d results in smaller chunks
+                w_d = load_intermediate(intermediate_path, 'w_d', self.device)
+                print(f'Loaded w_d shape: {w_d.shape}')
+
+                print(f'Before conv3d (v_s_warped): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved before conv3d (v_s_warped): {torch.cuda.memory_reserved()/1024**2:.2f} MB')
                 v_s_warped = self.conv3d(w_s)
+                print(f'After conv3d (v_s_warped): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved after conv3d (v_s_warped): {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+                print(f'Before conv3d (v_d_warped): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved before conv3d (v_d_warped): {torch.cuda.memory_reserved()/1024**2:.2f} MB')
                 v_d_warped = self.conv3d(w_d)
+                print(f'After conv3d (v_d_warped): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved after conv3d (v_d_warped): {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
                 output = self.conv2d(v_s_warped)
 
@@ -317,7 +351,6 @@ class Trainer:
             print(f'End of iteration: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
         else:
             print("Error: total_v_d is empty, unable to concatenate tensors.")
-
 
 
 
