@@ -212,7 +212,7 @@ class Trainer:
         R_s, t_s, z_s = e_s
         print(f'R_s shape: {R_s.shape}, t_s shape: {t_s.shape}, z_s shape: {z_s.shape}')  # Debug print
 
-        chunk_size = 25  # Further reduce the chunk size
+        chunk_size = 25  # Adjust the chunk size as needed
         intermediate_path = "/content/drive/MyDrive/VASA-1-master/intermediate_chunks"
 
         for i in range(0, target.size(0), chunk_size):
@@ -280,45 +280,59 @@ class Trainer:
 
             with autocast():
                 e_s_unpacked = torch.cat(e_s, dim=1)
-                print(f'Before warping_generator_s: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
-                print(f'GPU memory reserved before warping_generator_s: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
                 w_s = self.warping_generator_s(R_s, t_s, z_s, e_s_unpacked)
-                print(f'After warping_generator_s: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
-                print(f'GPU memory reserved after warping_generator_s: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
-                e_d_unpacked = torch.cat(e_d, dim=1)
-                print(f'Before warping_generator_d: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
-                print(f'GPU memory reserved before warping_generator_d: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+                # Process warping_generator_d in chunks
+                chunk_size_wd = 25
+                total_w_d = []
+                for i in range(0, v_d.size(0), chunk_size_wd):
+                    v_d_chunk = v_d[i:i+chunk_size_wd]
+                    e_d_chunk = tuple(enc[i:i+chunk_size_wd] for enc in e_d)
+                    e_d_unpacked = torch.cat(e_d_chunk, dim=1)
+                    w_d_chunk = self.warping_generator_d(e_d_chunk[0], e_d_chunk[1], e_d_chunk[2], e_d_unpacked)
+                    total_w_d.append(w_d_chunk.cpu())
+                    del v_d_chunk, e_d_chunk, w_d_chunk
+                    torch.cuda.empty_cache()
+                    gc.collect()
 
-                # Process w_d in chunks
-                chunk_size_wd = 25  # Further reduce chunk size for w_d
-                total_v_d_warped = []
-                for i in range(0, e_d_unpacked.size(0), chunk_size_wd):
-                    w_d_chunk = self.warping_generator_d(R_d[i:i+chunk_size_wd], t_d[i:i+chunk_size_wd], z_d[i:i+chunk_size_wd], e_d_unpacked[i:i+chunk_size_wd])
-                    print(f'Processed w_d_chunk shape: {w_d_chunk.shape}')
-                    v_d_warped_chunk = torch_checkpoint.checkpoint(self.conv3d, w_d_chunk, use_reentrant=False)  # Use gradient checkpointing
-                    total_v_d_warped.append(v_d_warped_chunk.cpu())
+                w_d = torch.cat(total_w_d, dim=0).to(self.device)
+                del total_w_d
+                torch.cuda.empty_cache()
+                gc.collect()
+
+                v_s_warped = self.conv3d(w_s)
+                v_d_warped = []
+                for i in range(0, w_d.size(0), chunk_size_wd):
+                    w_d_chunk = w_d[i:i+chunk_size_wd].to(self.device)
+                    v_d_warped_chunk = self.conv3d(w_d_chunk)
+                    v_d_warped.append(v_d_warped_chunk.cpu())
                     del w_d_chunk, v_d_warped_chunk
                     torch.cuda.empty_cache()
                     gc.collect()
 
-                v_d_warped = torch.cat(total_v_d_warped, dim=0).to(self.device)
-                print(f'After conv3d (v_d_warped): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
-                print(f'GPU memory reserved after conv3d (v_d_warped): {torch.cuda.memory_reserved()/1024**2:.2f} MB')
-
-                v_s_warped = torch_checkpoint.checkpoint(self.conv3d, w_s, use_reentrant=False)  # Process v_s_warped with checkpointing
-                print(f'After conv3d (v_s_warped): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
-                print(f'GPU memory reserved after conv3d (v_s_warped): {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+                v_d_warped = torch.cat(v_d_warped, dim=0).to(self.device)
 
                 output = self.conv2d(v_s_warped)
 
                 loss_perceptual = self.perceptual_loss(output.cpu().detach(), target.cpu().detach())
+                print(f'After perceptual loss: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved after perceptual loss: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+                print(f'Before discriminator: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved before discriminator: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+                # Calculate adversarial loss
                 loss_adv = self.adversarial_loss(self.discriminator(target), self.discriminator(output))
-                loss_cycle = self.cycle_consistency_loss(output.cpu().detach(), target.cpu().detach())
-                loss_pairwise = self.pairwise_loss(v_s.cpu().detach(), v_d.cpu().detach())
-                loss_cosine = self.cosine_similarity_loss(e_s.cpu().detach(), e_d.cpu().detach())
+
+                print(f'After discriminator: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved after discriminator: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+                loss_cycle = self.cycle_consistency_loss(output, target)
+                loss_pairwise = self.pairwise_loss(v_s, v_d)
+                loss_cosine = self.cosine_similarity_loss(e_s, e_d)
 
                 self.total_loss = loss_perceptual + loss_adv + loss_cycle + loss_pairwise + loss_cosine
+                print(f'Calculated losses - Perceptual: {loss_perceptual.item()}, Adversarial: {loss_adv.item()}, Cycle: {loss_cycle.item()}, Pairwise: {loss_pairwise.item()}, Cosine: {loss_cosine.item()}')
             print(f'After loss calculation: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
             print(f'GPU memory reserved after loss calculation: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
@@ -347,48 +361,6 @@ class Trainer:
             print(f'End of iteration: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
         else:
             print("Error: total_v_d is empty, unable to concatenate tensors.")
-
-
-
-
-    def train_high_res_model(self, source, target, iteration):
-        self.optimizer_G.zero_grad()
-
-        if iteration % 2 == 0:
-            sample_info = self.train_loader.dataset.same_person_pairs[iteration % len(self.train_loader.dataset.same_person_pairs)]
-        else:
-            sample_info = self.train_loader.dataset.different_person_pairs[iteration % len(self.train_loader.dataset.different_person_pairs)]
-
-        source_path = os.path.join(self.train_loader.dataset.data_path, sample_info['source'])
-        driving_path = os.path.join(self.train_loader.dataset.data_path, sample_info['driving'])
-
-        source_image = Image.open(source_path).convert('RGB')
-        driving_frames = self.train_loader.dataset.load_video(driving_path)
-
-        if self.train_loader.dataset.transform:
-            source_image = self.train_loader.dataset.transform(source_image)
-            driving_frames = [self.train_loader.dataset.transform(frame) for frame in driving_frames]
-
-        source = source_image.to(self.device)
-        target = torch.stack(driving_frames).to(self.device)  # Stack driving frames into a single tensor
-
-        output = self.model(source)
-
-        loss_l1 = self.l1_loss(output, target)
-        loss_adv = self.adversarial_loss(self.discriminator(target), self.discriminator(output))
-        loss_perceptual = self.perceptual_loss(output, target)
-        loss_cycle = self.cycle_consistency_loss(output, target)
-
-        self.total_loss = loss_l1 + loss_adv + loss_perceptual + loss_cycle
-        self.total_loss.backward()
-        self.optimizer_G.step()
-
-        self.optimizer_D.zero_grad()
-        real_loss = self.adversarial_loss(self.discriminator(target), torch.ones_like(self.discriminator(target)))
-        fake_loss = self.adversarial_loss(self.discriminator(output.detach()), torch.zeros_like(self.discriminator(output.detach())))
-        self.d_loss = (real_loss + fake_loss) / 2
-        self.d_loss.backward()
-        self.optimizer_D.step()
 
 
     def train_student_model(self, source, target, iteration):
