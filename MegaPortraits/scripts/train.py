@@ -12,6 +12,7 @@ import gc
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from torch.cuda.amp import GradScaler, autocast
+import torch.utils.checkpoint as torch_checkpoint
 from models.appearance_encoder import AppearanceEncoder
 from models.motion_encoder import MotionEncoder
 from models.warping_generators import WarpingGenerator
@@ -174,6 +175,8 @@ class Trainer:
 
     
 
+
+
     def train_base_model(self, source, target, iteration):
         print("Starting train_base_model function")
         self.optimizer_G.zero_grad()
@@ -209,7 +212,7 @@ class Trainer:
         R_s, t_s, z_s = e_s
         print(f'R_s shape: {R_s.shape}, t_s shape: {t_s.shape}, z_s shape: {z_s.shape}')  # Debug print
 
-        chunk_size = 100  # Adjust the chunk size as needed
+        chunk_size = 25  # Further reduce the chunk size
         intermediate_path = "/content/drive/MyDrive/VASA-1-master/intermediate_chunks"
 
         for i in range(0, target.size(0), chunk_size):
@@ -286,41 +289,34 @@ class Trainer:
                 e_d_unpacked = torch.cat(e_d, dim=1)
                 print(f'Before warping_generator_d: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
                 print(f'GPU memory reserved before warping_generator_d: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
-                w_d = self.warping_generator_d(R_d, t_d, z_d, e_d_unpacked)
-                print(f'After warping_generator_d: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
-                print(f'GPU memory reserved after warping_generator_d: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
-                # Save intermediate results of warping_generator_d
-                save_intermediate(w_d.cpu(), intermediate_path, 'w_d')
+                # Process w_d in chunks
+                chunk_size_wd = 25  # Further reduce chunk size for w_d
+                total_v_d_warped = []
+                for i in range(0, e_d_unpacked.size(0), chunk_size_wd):
+                    w_d_chunk = self.warping_generator_d(R_d[i:i+chunk_size_wd], t_d[i:i+chunk_size_wd], z_d[i:i+chunk_size_wd], e_d_unpacked[i:i+chunk_size_wd])
+                    print(f'Processed w_d_chunk shape: {w_d_chunk.shape}')
+                    v_d_warped_chunk = torch_checkpoint.checkpoint(self.conv3d, w_d_chunk, use_reentrant=False)  # Use gradient checkpointing
+                    total_v_d_warped.append(v_d_warped_chunk.cpu())
+                    del w_d_chunk, v_d_warped_chunk
+                    torch.cuda.empty_cache()
+                    gc.collect()
 
-                del w_d
-                torch.cuda.empty_cache()
-                gc.collect()
-                print(f'GPU memory reserved after saving and clearing w_d: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
-
-                # Load and process warping_generator_d results in smaller chunks
-                w_d = load_intermediate(intermediate_path, 'w_d', self.device)
-                print(f'Loaded w_d shape: {w_d.shape}')
-
-                print(f'Before conv3d (v_s_warped): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
-                print(f'GPU memory reserved before conv3d (v_s_warped): {torch.cuda.memory_reserved()/1024**2:.2f} MB')
-                v_s_warped = self.conv3d(w_s)
-                print(f'After conv3d (v_s_warped): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
-                print(f'GPU memory reserved after conv3d (v_s_warped): {torch.cuda.memory_reserved()/1024**2:.2f} MB')
-
-                print(f'Before conv3d (v_d_warped): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
-                print(f'GPU memory reserved before conv3d (v_d_warped): {torch.cuda.memory_reserved()/1024**2:.2f} MB')
-                v_d_warped = self.conv3d(w_d)
+                v_d_warped = torch.cat(total_v_d_warped, dim=0).to(self.device)
                 print(f'After conv3d (v_d_warped): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
                 print(f'GPU memory reserved after conv3d (v_d_warped): {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
+                v_s_warped = torch_checkpoint.checkpoint(self.conv3d, w_s, use_reentrant=False)  # Process v_s_warped with checkpointing
+                print(f'After conv3d (v_s_warped): {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved after conv3d (v_s_warped): {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
                 output = self.conv2d(v_s_warped)
 
-                loss_perceptual = self.perceptual_loss(output, target)
+                loss_perceptual = self.perceptual_loss(output.cpu().detach(), target.cpu().detach())
                 loss_adv = self.adversarial_loss(self.discriminator(target), self.discriminator(output))
-                loss_cycle = self.cycle_consistency_loss(output, target)
-                loss_pairwise = self.pairwise_loss(v_s, v_d)
-                loss_cosine = self.cosine_similarity_loss(e_s, e_d)
+                loss_cycle = self.cycle_consistency_loss(output.cpu().detach(), target.cpu().detach())
+                loss_pairwise = self.pairwise_loss(v_s.cpu().detach(), v_d.cpu().detach())
+                loss_cosine = self.cosine_similarity_loss(e_s.cpu().detach(), e_d.cpu().detach())
 
                 self.total_loss = loss_perceptual + loss_adv + loss_cycle + loss_pairwise + loss_cosine
             print(f'After loss calculation: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
