@@ -214,6 +214,7 @@ class Trainer:
 
         chunk_size = 25  # Adjust the chunk size as needed
         intermediate_path = "/content/drive/MyDrive/VASA-1-master/intermediate_chunks"
+        os.makedirs(intermediate_path, exist_ok=True)
 
         for i in range(0, target.size(0), chunk_size):
             target_chunk = target[i:i+chunk_size]
@@ -328,11 +329,37 @@ class Trainer:
                 print(f'GPU memory reserved after discriminator: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
                 loss_cycle = self.cycle_consistency_loss(output, target)
-                loss_pairwise = self.pairwise_loss(v_s, v_d)
-                loss_cosine = self.cosine_similarity_loss(e_s, e_d)
+                print(f'After cycle consistency loss: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved after cycle consistency loss: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+                # Process pairwise loss in chunks
+                total_loss_pairwise = 0
+                for i in range(0, v_d.shape[1], chunk_size):
+                    v_s_chunk = v_s.expand(v_d.shape[1], *v_s.shape[1:]).contiguous()
+                    v_d_chunk = v_d[:, i:i+chunk_size, :, :, :].contiguous()
+
+                    print(f'Processing pairwise loss chunk {i//chunk_size + 1} with size {v_d_chunk.size(1)}')
+                    print(f'v_s_chunk shape: {v_s_chunk.shape}, v_d_chunk shape: {v_d_chunk.shape}')
+                    print(f'GPU memory allocated before pairwise loss chunk: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                    print(f'GPU memory reserved before pairwise loss chunk: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+                    loss_chunk = self.pairwise_loss(v_s_chunk, v_d_chunk)
+
+                    total_loss_pairwise += loss_chunk.item()
+                    del v_s_chunk, v_d_chunk, loss_chunk
+                    torch.cuda.empty_cache()
+                    gc.collect()
+
+                loss_pairwise = total_loss_pairwise
+                print(f'After pairwise loss: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved after pairwise loss: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
+
+                loss_cosine = self.cosine_similarity_loss(torch.cat(e_s, dim=1), torch.cat(e_d, dim=1))
+                print(f'After cosine similarity loss: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
+                print(f'GPU memory reserved after cosine similarity loss: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
                 self.total_loss = loss_perceptual + loss_adv + loss_cycle + loss_pairwise + loss_cosine
-                print(f'Calculated losses - Perceptual: {loss_perceptual.item()}, Adversarial: {loss_adv.item()}, Cycle: {loss_cycle.item()}, Pairwise: {loss_pairwise.item()}, Cosine: {loss_cosine.item()}')
+                print(f'Calculated losses - Perceptual: {loss_perceptual.item()}, Adversarial: {loss_adv.item()}, Cycle: {loss_cycle.item()}, Pairwise: {loss_pairwise}, Cosine: {loss_cosine.item()}')
             print(f'After loss calculation: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
             print(f'GPU memory reserved after loss calculation: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
@@ -361,9 +388,7 @@ class Trainer:
             print(f'End of iteration: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
         else:
             print("Error: total_v_d is empty, unable to concatenate tensors.")
-
-
-
+    
     def train_high_res_model(self, source, target, iteration):
         self.optimizer_G.zero_grad()
 
