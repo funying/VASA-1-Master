@@ -363,6 +363,47 @@ class Trainer:
             print("Error: total_v_d is empty, unable to concatenate tensors.")
 
 
+
+    def train_high_res_model(self, source, target, iteration):
+        self.optimizer_G.zero_grad()
+
+        if iteration % 2 == 0:
+            sample_info = self.train_loader.dataset.same_person_pairs[iteration % len(self.train_loader.dataset.same_person_pairs)]
+        else:
+            sample_info = self.train_loader.dataset.different_person_pairs[iteration % len(self.train_loader.dataset.different_person_pairs)]
+
+        source_path = os.path.join(self.train_loader.dataset.data_path, sample_info['source'])
+        driving_path = os.path.join(self.train_loader.dataset.data_path, sample_info['driving'])
+
+        source_image = Image.open(source_path).convert('RGB')
+        driving_frames = self.train_loader.dataset.load_video(driving_path)
+
+        if self.train_loader.dataset.transform:
+            source_image = self.train_loader.dataset.transform(source_image)
+            driving_frames = [self.train_loader.dataset.transform(frame) for frame in driving_frames]
+
+        source = source_image.to(self.device)
+        target = torch.stack(driving_frames).to(self.device)  # Stack driving frames into a single tensor
+
+        output = self.model(source)
+
+        loss_l1 = self.l1_loss(output, target)
+        loss_adv = self.adversarial_loss(self.discriminator(target), self.discriminator(output))
+        loss_perceptual = self.perceptual_loss(output, target)
+        loss_cycle = self.cycle_consistency_loss(output, target)
+
+        self.total_loss = loss_l1 + loss_adv + loss_perceptual + loss_cycle
+        self.total_loss.backward()
+        self.optimizer_G.step()
+
+        self.optimizer_D.zero_grad()
+        real_loss = self.adversarial_loss(self.discriminator(target), torch.ones_like(self.discriminator(target)))
+        fake_loss = self.adversarial_loss(self.discriminator(output.detach()), torch.zeros_like(self.discriminator(output.detach())))
+        self.d_loss = (real_loss + fake_loss) / 2
+        self.d_loss.backward()
+        self.optimizer_D.step()
+
+
     def train_student_model(self, source, target, iteration):
         self.optimizer_G.zero_grad()
 

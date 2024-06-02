@@ -28,7 +28,7 @@ class ResidualBlock2D(nn.Module):
 class Conv2D(nn.Module):
     def __init__(self):
         super(Conv2D, self).__init__()
-        self.reshaped = nn.Conv2d(96 * 16, 1536, kernel_size=1, stride=1)
+        self.reshaped = nn.Conv2d(48 * 32, 1536, kernel_size=1, stride=1)  # Adjust input channels to match example input
         self.res_blocks = nn.Sequential(
             ResidualBlock2D(1536, 512, num_groups=8),  # 512 is divisible by 8
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
@@ -40,13 +40,20 @@ class Conv2D(nn.Module):
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
             ResidualBlock2D(64, 32, num_groups=8)    # 32 is divisible by 8
         )
+        self.final_conv = nn.Conv2d(32, 3, kernel_size=1)  # Final layer to reduce channels to 3
 
     def forward(self, x):
-        x = x.view(x.size(0), -1, x.size(3), x.size(4))  # Reshape to 2D features
+        print(f"Input shape before reshaping: {x.shape}")
+        x = x.view(x.size(0), -1, x.size(3), x.size(4))  # Correct reshaping to match input channels
+        print(f"Input shape after reshaping: {x.shape}")
         x = F.relu(self.reshaped(x))
+        print(f"Shape after initial conv: {x.shape}")
         x = self.res_blocks(x)
+        print(f"Output shape after res blocks: {x.shape}")
+        x = self.final_conv(x)  # Ensure output has 3 channels
+        print(f"Final output shape: {x.shape}")
         return torch.sigmoid(x)
-
+        
 if __name__ == "__main__":
     model = Conv2D()
     print(model)
