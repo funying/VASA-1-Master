@@ -34,6 +34,7 @@ from utils.intermediate import save_intermediate, load_intermediate
 
 class Trainer:
     def __init__(self, config, model_type):
+        self.scaler = GradScaler()
         self.config = config
         self.model_type = model_type
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -335,7 +336,7 @@ class Trainer:
                 # Process pairwise loss in chunks
                 total_loss_pairwise = 0
                 for i in range(0, v_d.shape[1], chunk_size):
-                    v_s_chunk = v_s.expand(v_d.shape[1], *v_s.shape[1:]).contiguous()
+                    v_s_chunk = v_s.expand(batch_size, v_d.shape[1], *v_s.shape[1:]).contiguous()
                     v_d_chunk = v_d[:, i:i+chunk_size, :, :, :].contiguous()
 
                     print(f'Processing pairwise loss chunk {i//chunk_size + 1} with size {v_d_chunk.size(1)}')
@@ -343,7 +344,7 @@ class Trainer:
                     print(f'GPU memory allocated before pairwise loss chunk: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
                     print(f'GPU memory reserved before pairwise loss chunk: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
-                    loss_chunk = self.pairwise_loss(v_s_chunk, v_d_chunk)
+                    loss_chunk = self.pairwise_loss(v_s_chunk[:, :v_d_chunk.size(1)], v_d_chunk)
 
                     total_loss_pairwise += loss_chunk.item()
                     del v_s_chunk, v_d_chunk, loss_chunk
@@ -359,7 +360,7 @@ class Trainer:
                 print(f'GPU memory reserved after cosine similarity loss: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
                 self.total_loss = loss_perceptual + loss_adv + loss_cycle + loss_pairwise + loss_cosine
-                print(f'Calculated losses - Perceptual: {loss_perceptual.item()}, Adversarial: {loss_adv.item()}, Cycle: {loss_cycle.item()}, Pairwise: {loss_pairwise}, Cosine: {loss_cosine.item()}')
+                print(f'Calculated losses - Perceptual: {loss_perceptual.item() if torch.is_tensor(loss_perceptual) else loss_perceptual}, Adversarial: {loss_adv.item() if torch.is_tensor(loss_adv) else loss_adv}, Cycle: {loss_cycle.item() if torch.is_tensor(loss_cycle) else loss_cycle}, Pairwise: {loss_pairwise}, Cosine: {loss_cosine.item() if torch.is_tensor(loss_cosine) else loss_cosine}')
             print(f'After loss calculation: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
             print(f'GPU memory reserved after loss calculation: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
