@@ -28,23 +28,23 @@ class ResidualBlock2D(nn.Module):
 class Conv2D(nn.Module):
     def __init__(self):
         super(Conv2D, self).__init__()
-        self.reshaped = nn.Conv2d(48 * 32, 1536, kernel_size=1, stride=1)  # Adjust input channels to match example input
+        self.reshaped = nn.Conv2d(48 * 32, 1536, kernel_size=1, stride=1)  
         self.res_blocks = nn.Sequential(
-            ResidualBlock2D(1536, 512, num_groups=8),  # 512 is divisible by 8
+            ResidualBlock2D(1536, 512, num_groups=8),  
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            ResidualBlock2D(512, 256, num_groups=8),  # 256 is divisible by 8
+            ResidualBlock2D(512, 256, num_groups=8),  
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            ResidualBlock2D(256, 128, num_groups=8),  # 128 is divisible by 8
+            ResidualBlock2D(256, 128, num_groups=8),  
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            ResidualBlock2D(128, 64, num_groups=8),   # 64 is divisible by 8
+            ResidualBlock2D(128, 64, num_groups=8),   
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-            ResidualBlock2D(64, 32, num_groups=8)    # 32 is divisible by 8
+            ResidualBlock2D(64, 32, num_groups=8)    
         )
-        self.final_conv = nn.Conv2d(32, 3, kernel_size=1)  # Final layer to reduce channels to 3
+        self.final_conv = nn.Conv2d(32, 3, kernel_size=1)  
 
     def forward(self, x):
         print(f"Input shape before reshaping: {x.shape}")
-        x = x.view(x.size(0), -1, x.size(3), x.size(4))  # Correct reshaping to match input channels
+        x = x.view(x.size(0), -1, x.size(3), x.size(4))  
         print(f"Input shape after reshaping: {x.shape}")
         x = F.relu(self.reshaped(x))
         print(f"Shape after initial conv: {x.shape}")

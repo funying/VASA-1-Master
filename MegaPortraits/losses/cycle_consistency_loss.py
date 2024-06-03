@@ -14,7 +14,7 @@ class CycleConsistencyLoss(nn.Module):
             y = torch.nn.functional.interpolate(y, size=x.shape[2:], mode='bilinear', align_corners=False)
 
         # Process in chunks
-        chunk_size = 25  # Adjust chunk size as needed
+        chunk_size = 25  
         losses = []
         for i in range(0, x.size(0), chunk_size):
             x_chunk = x[i:i+chunk_size]

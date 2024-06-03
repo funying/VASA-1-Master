@@ -38,8 +38,7 @@ class HighResEncoder(nn.Module):
         x = F.relu(self.conv(x))
         x = self.res_blocks(x)
         x = self.conv_final(x)
-        return x.view(x.size(0), 1536, 16, 16, 16)  # Reshape to 3D features
-
+        return x.view(x.size(0), 1536, 16, 16, 16)  
 class HighResDecoder(nn.Module):
     def __init__(self):
         super(HighResDecoder, self).__init__()

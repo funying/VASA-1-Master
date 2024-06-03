@@ -36,21 +36,17 @@ class PerceptualLoss(nn.Module):
             print(f"x shape: {x.shape}, y shape: {y.shape}")
             raise
 
-        # Debugging: print the shapes and types of resized x and y
         print(f"x_resized shape after resizing: {x_resized.shape}, dtype: {x_resized.dtype}")
         print(f"y_resized shape after resizing: {y_resized.shape}, dtype: {y_resized.dtype}")
 
-        # Ensure the resized arrays have 3 channels
         if x_resized.shape[-1] != 3:
             x_resized = np.stack([x_resized[..., i] for i in range(3)], axis=-1)
         if y_resized.shape[-1] != 3:
             y_resized = np.stack([y_resized[..., i] for i in range(3)], axis=-1)
 
-        # Preprocess input
         x_resized = preprocess_input(x_resized)
         y_resized = preprocess_input(y_resized)
 
-        # Convert numpy array back to torch tensor
         x_resized = torch.tensor(x_resized.copy(), dtype=torch.float32).permute(0, 3, 1, 2)
         y_resized = torch.tensor(y_resized.copy(), dtype=torch.float32).permute(0, 3, 1, 2)
 
@@ -58,11 +54,10 @@ class PerceptualLoss(nn.Module):
         x_resized = x_resized.permute(0, 2, 3, 1).numpy()  # Convert to (batch_size, height, width, channels)
         y_resized = y_resized.permute(0, 2, 3, 1).numpy()  # Convert to (batch_size, height, width, channels)
 
-        # Debugging: print the shapes and types of resized x and y before passing to the model
         print(f"x_resized shape before model: {x_resized.shape}, dtype: {x_resized.dtype}")
         print(f"y_resized shape before model: {y_resized.shape}, dtype: {y_resized.dtype}")
 
-        # Forward through the model
+        # Forward pass through VGGFace model
         x_vgg = self.model.predict(x_resized)
         y_vgg = self.model.predict(y_resized)
         x_vgg = torch.tensor(x_vgg)
